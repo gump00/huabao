@@ -10,3 +10,39 @@ const news=[
 ;const dlg=$('#news-dialog');$$('[data-news]').forEach(b=>b.addEventListener('click',()=>{let n=news[Number(b.dataset.news)];$('#dialog-title').textContent=n[0];$('#dialog-text').replaceChildren(...n[1].split('\n\n').map(text=>{const paragraph=document.createElement('p');paragraph.textContent=text;return paragraph;}));const gallery=$('#dialog-gallery');gallery.replaceChildren();gallery.hidden=!(n[5]&&n[5].length);(n[5]||[]).forEach(([src,caption])=>{const figure=document.createElement('figure');const image=document.createElement('img');image.src=src;image.alt=caption;image.loading='lazy';const label=document.createElement('figcaption');label.textContent=caption;figure.append(image,label);gallery.append(figure);});$('#dialog-date').textContent=n[2];$('#dialog-date').hidden=!n[2];$('#dialog-figure').hidden=!n[3];if(n[3]){$('#dialog-image').src=n[3];$('#dialog-image').alt=n[4];$('#dialog-caption').textContent=n[4];}dlg.showModal();dlg.scrollTop=0;}));$('.dialog-close').addEventListener('click',()=>dlg.close());dlg.addEventListener('click',e=>{if(e.target===dlg){const r=dlg.getBoundingClientRect();if(e.clientX<r.left||e.clientX>r.right||e.clientY<r.top||e.clientY>r.bottom)dlg.close()}});
 let timer;function toast(s){$('#toast').textContent=s;$('#toast').classList.add('show');clearTimeout(timer);timer=setTimeout(()=>$('#toast').classList.remove('show'),3000)}async function copy(s){try{await navigator.clipboard.writeText(s);toast('已复制，可粘贴发送')}catch{const ta=document.createElement('textarea');ta.value=s;document.body.appendChild(ta);ta.select();const ok=document.execCommand('copy');ta.remove();toast(ok?'已复制，可粘贴发送':'复制未成功，请长按文字手动复制')}}$('.copy-account').addEventListener('click',()=>copy('tangyinhua688'));$('#inquiry').addEventListener('submit',e=>{e.preventDefault();const city=$('#city').value.trim(),detail=$('#detail').value.trim();if(!city||!detail){toast('请填写所在城市与具体情况');return}$('#result-text').value=`您好，我想了解湖南华宝虫控的${$('#need').value}相关方案。\n所在城市：${city}\n具体情况：${detail}\n请问如何进一步沟通？谢谢。`;$('#inquiry-result').hidden=false;$('#result-text').focus();toast('咨询文字已生成，复制后可发送给官方账号')});$('#copy-inquiry').addEventListener('click',()=>copy($('#result-text').value));$('#year').textContent=new Date().getFullYear();
 const sections=$$('main section[id]');if('IntersectionObserver'in window){const obs=new IntersectionObserver(entries=>{entries.forEach(e=>{if(e.isIntersecting){$$('nav a').forEach(a=>a.classList.toggle('active',a.getAttribute('href')==='#'+e.target.id))}})},{rootMargin:'-20% 0px -55% 0px'});sections.forEach(s=>obs.observe(s))}
+/* 站内锚点滚动：自行缓动，不依赖浏览器的 scroll-behavior:smooth */
+const headerBar=$('header'),reduceMotion=matchMedia('(prefers-reduced-motion: reduce)');let scrollAnim=0;
+/**
+ * 计算锚点的目标滚动位置，扣除吸顶导航栏高度，避免标题被遮挡。
+ * @param {HTMLElement} target 锚点元素
+ * @returns {number} 目标 scrollTop，已限制在可滚动范围内
+ */
+function anchorOffset(target){const gap=(headerBar?headerBar.offsetHeight:0)+9,top=target.getBoundingClientRect().top+window.scrollY-gap,max=document.documentElement.scrollHeight-window.innerHeight;return Math.max(0,Math.min(Math.round(top),Math.round(max)))}
+/**
+ * 用 requestAnimationFrame 缓动滚动到锚点（easeInOutCubic）。
+ * 逐帧使用 behavior:'instant' 覆盖 CSS 的 smooth，避免两套动画叠加。
+ * 系统开启“减少动态效果”时缩短为 380ms，仍保留滚动过程，便于看清页面位置变化。
+ * @param {HTMLElement} target 锚点元素
+ */
+function smoothScrollTo(target){const from=window.scrollY,to=anchorOffset(target),dist=to-from;cancelAnimationFrame(scrollAnim);if(Math.abs(dist)<2){window.scrollTo({top:to,behavior:'instant'});return}const dur=reduceMotion.matches?380:Math.min(1100,Math.max(450,Math.abs(dist)*.42)),t0=performance.now(),step=now=>{const p=Math.min(1,(now-t0)/dur),e=p<.5?4*p*p*p:1-Math.pow(-2*p+2,3)/2;window.scrollTo({top:from+dist*e,behavior:'instant'});if(p<1)scrollAnim=requestAnimationFrame(step)};scrollAnim=requestAnimationFrame(step)}
+['wheel','touchstart','keydown'].forEach(evt=>window.addEventListener(evt,()=>cancelAnimationFrame(scrollAnim),{passive:true}));
+document.addEventListener('click',e=>{if(!(e.target instanceof Element))return;const link=e.target.closest('a[href^="#"]');if(!link)return;const href=link.getAttribute('href');if(href==='#')return;const target=document.getElementById(href.slice(1));if(!target)return;e.preventDefault();smoothScrollTo(target);history.pushState(null,'',href);target.setAttribute('tabindex','-1');target.focus({preventScroll:true})});
+/* 首页新闻封面轮播：依次展示该条新闻的全部现场图片 */
+/**
+ * 取出一条新闻的全部图片（首图 + 附图）。
+ * @param {Array} item news 数组中的一条记录
+ * @returns {Array<[string,string]>} [图片地址, 图片说明] 列表
+ */
+function newsImages(item){const list=[];if(item&&item[3])list.push([item[3],item[4]||item[0]]);((item&&item[5])||[]).forEach(pair=>{if(pair&&pair[0])list.push([pair[0],pair[1]||item[0]])});return list}
+/**
+ * 为一张新闻卡片建立封面轮播：补齐图片、生成指示点、按固定间隔淡入淡出。
+ * 鼠标悬停、键盘聚焦、卡片移出视口、页面隐藏或详情弹窗打开时暂停。
+ * 系统开启“减少动态效果”时照常轮播，仅由 CSS 把淡入淡出缩短。
+ * @param {HTMLElement} card 带 data-news 的新闻卡片
+ */
+function buildNewsCarousel(card){const photo=card.querySelector('.news-photo'),first=photo&&photo.querySelector('img');if(!photo||!first)return;const images=newsImages(news[Number(card.dataset.news)]);if(images.length<2)return;photo.classList.add('has-carousel');first.classList.add('is-active');const slides=[first];images.slice(1).forEach(([src])=>{const img=document.createElement('img');img.src=src;img.alt='';img.loading='lazy';img.decoding='async';img.setAttribute('aria-hidden','true');slides[slides.length-1].after(img);slides.push(img)});const dots=document.createElement('span');dots.className='photo-dots';dots.setAttribute('aria-hidden','true');slides.forEach(()=>dots.append(document.createElement('i')));dots.children[0].className='on';photo.append(dots);const count=photo.querySelector('.photo-count');if(count)count.textContent=slides.length+'张现场图片';let index=0,paused=false,inView=true;
+const show=next=>{slides[index].classList.remove('is-active');dots.children[index].classList.remove('on');index=next;slides[index].classList.add('is-active');dots.children[index].classList.add('on')};
+card.addEventListener('mouseenter',()=>{paused=true});card.addEventListener('mouseleave',()=>{paused=false});card.addEventListener('focusin',()=>{paused=true});card.addEventListener('focusout',()=>{paused=false});
+if('IntersectionObserver'in window)new IntersectionObserver(es=>{inView=es[0].isIntersecting},{threshold:.25}).observe(photo);
+setInterval(()=>{if(paused||!inView||document.hidden||dlg.open)return;show((index+1)%slides.length)},3800)}
+$$('.news-card[data-news]').forEach(buildNewsCarousel);
